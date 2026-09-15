@@ -5,7 +5,7 @@ Official ox deploy example: the multi-process kitchen sink. Django 5.2 serves a 
 What this example demonstrates beyond the single-process [oxzoo-react-django](https://github.com/saurav-codes/oxzoo-react-django):
 
 - **Multi-process ordering**: `web`, `worker`, and `beat` systemd units with `depends_on` gates so workers start after the web process is ready.
-- **Infra autowiring**: `[[postgres_databases]]` creates a local role + database and injects `DATABASE_URL`; a local Redis is started and injected as `REDIS_URL`. No manual host setup.
+- **Infra autowiring**: the `DATABASE_URL` placeholder makes ox provision local PostgreSQL (role + database named by `DATABASE_NAME`) and inject the full DSN; a local Redis is started and injected as `REDIS_URL`. The `[[postgres_databases]]` block then enables `pgcrypto` on that database, whose name must match `DATABASE_NAME`. No manual host setup.
 - **Celery roundtrip**: `GET /api/greeting` enqueues a task, a worker executes it, and the result comes back through Redis.
 - **Beat timers**: `CELERYBEAT_SCHEDULE` repeats `heartbeat()` every 60 seconds, printed into the worker's journald log.
 - **Migrations**: the `migrate` deploy hook runs `manage.py migrate --noinput` against the autowired database.
@@ -30,7 +30,7 @@ What this example demonstrates beyond the single-process [oxzoo-react-django](ht
 - **`GREETING_TAG` is runtime env for Django and the worker**: `greetings/tasks.py` reads it from `os.environ` inside the worker process on every task, so `GET /api/greeting` returns `hello world oxzoo-django-celery_{GREETING_TAG}` with whatever the ox Environment editor currently holds. Change it in the editor and the API line follows without a redeploy.
 - **`GREETING_TAG` is build-time env for the SPA**: `vite.config.js` sets `envPrefix: ["GREETING_", "VITE_"]`, so `GREETING_TAG` present during `npm run build` is baked into the bundle via `import.meta.env.GREETING_TAG` (one contiguous template literal in `src/App.jsx`, on purpose). Changing the tag means rebuilding the SPA.
 - **`SECRET_KEY`**: Django signing key. Placeholder in `.env.example`; set a real value in the ox Environment editor.
-- **`DATABASE_URL`** (`postgres://change-me` in `.env.example`): autowired by ox. The manifest's `[[postgres_databases]]` block creates the local role + `oxzoo-celery` database (with `pgcrypto`), and ox injects the full DSN as `DATABASE_URL` into every process. Unset locally, `settings.py` falls back to `db.sqlite3` for convenience; ox always sets the real one.
+- **`DATABASE_URL`** (`postgres://change-me` in `.env.example`): autowired by ox — the placeholder triggers local PostgreSQL provisioning and ox injects the full DSN into every process. `DATABASE_NAME` (`oxzoo-celery`) names the database ox creates; it must equal the `[[postgres_databases]]` name in `ox.toml` so the `pgcrypto` extension step targets the same database. Unset locally, `settings.py` falls back to `db.sqlite3` for convenience; ox always sets the real one.
 - **`REDIS_URL`** (`redis://change-me` in `.env.example`): autowired by ox. ox starts a local Redis and injects the DSN; `config/settings.py` uses it for both `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` (a `CELERY_BROKER_URL` env var overrides if you ever split them).
 - **`DJANGO_ALLOWED_HOSTS`**: ox injects the deploy domain (comma-separated). `DJANGO_DEBUG` defaults to `false`.
 
