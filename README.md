@@ -37,7 +37,7 @@ What this example demonstrates beyond the single-process [oxzoo-react-django](ht
 ## Deploy with ox
 
 1. In the ox dashboard, create a project from the clone URL: `https://github.com/saurav-codes/oxzoo-django-celery`
-2. **Before the first deploy**, set `GREETING_TAG=w3-03` (and `SECRET_KEY`) in the project's Environment editor. The build hook bakes `GREETING_TAG` into the SPA, so it must exist before the first deploy.
+2. **Before the first deploy**, paste the values from `.env.example` into the project's Environment editor (at minimum `GREETING_TAG`, `DATABASE_URL`, `DATABASE_NAME`, and `REDIS_URL`). ox provisions infra from the editor's values — the repo's `.env.example` is documentation for them, not an input ox reads on remote deploys — and the `DATABASE_URL`/`REDIS_URL` placeholders are what trigger local PostgreSQL and Redis provisioning. The build hook bakes `GREETING_TAG` into the SPA, so it must exist before the first deploy.
 3. Press **Deploy**. ox:
    - creates the local postgres role + `oxzoo-celery` database with the `pgcrypto` extension and starts the local Redis,
    - runs `uv sync --frozen` and `npm install` (release-local installs),
