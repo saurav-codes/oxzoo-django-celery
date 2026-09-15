@@ -32,7 +32,7 @@ What this example demonstrates beyond the single-process [oxzoo-react-django](ht
 - **`SECRET_KEY`**: Django signing key. Placeholder in `.env.example`; set a real value in the ox Environment editor.
 - **`DATABASE_URL`** (`postgres://change-me` in `.env.example`): autowired by ox — the placeholder triggers local PostgreSQL provisioning and ox injects the full DSN into every process. `DATABASE_NAME` (`oxzoo-celery`) names the database ox creates; it must equal the `[[postgres_databases]]` name in `ox.toml` so the `pgcrypto` extension step targets the same database. Unset locally, `settings.py` falls back to `db.sqlite3` for convenience; ox always sets the real one.
 - **`REDIS_URL`** (`redis://change-me` in `.env.example`): autowired by ox. ox starts a local Redis and injects the DSN; `config/settings.py` uses it for both `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` (a `CELERY_BROKER_URL` env var overrides if you ever split them).
-- **`DJANGO_ALLOWED_HOSTS`**: ox injects the deploy domain (comma-separated). `DJANGO_DEBUG` defaults to `false`.
+- **`ALLOWED_HOSTS`**: ox injects the deploy domain (comma-separated); `settings.py` reads it directly. `DJANGO_DEBUG` defaults to `false`.
 
 ## Deploy with ox
 

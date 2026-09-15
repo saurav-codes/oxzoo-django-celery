@@ -10,10 +10,10 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-secret-key")
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
 
-# ox injects the deploy domain as DJANGO_ALLOWED_HOSTS (comma-separated).
+# ox injects the deploy domain as ALLOWED_HOSTS (comma-separated).
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
+    for host in os.environ.get("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
     if host.strip()
 ]
 
