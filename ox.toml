@@ -1,0 +1,56 @@
+# ox deploy manifest for oxzoo-django-celery: the multi-process kitchen sink.
+# Three ordered processes (web, celery worker, celery beat) with redis and a
+# local postgres database autowired from the project env.
+
+name = "oxzoo-django-celery"
+branch = "main"
+runtime = "python"
+framework = "django"
+package_manager = "uv"
+port = 9117
+environment_file = "/etc/ox/apps/oxzoo-django-celery.env"
+required_packages = ["nodejs"]
+
+[[apt_sources]]
+name = "nodesource"
+url = "https://deb.nodesource.com/node_22.x"
+suite = "nodistro"
+components = ["main"]
+key_url = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
+
+# Local postgres role + database (DSN injected as DATABASE_URL), with one
+# extension to demonstrate the mechanism.
+[[postgres_databases]]
+name = "oxzoo-celery"
+extensions = ["pgcrypto"]
+
+[[processes]]
+name = "web"
+command = "uv run gunicorn config.wsgi:application --bind 127.0.0.1:{port} --workers 2"
+depends_on = ["postgres_database.oxzoo-celery", "redis"]
+readiness = "http://127.0.0.1:{port}/health"
+
+[[processes]]
+name = "worker"
+command = "uv run celery -A config worker --loglevel=INFO --concurrency=1"
+depends_on = ["redis", "web"]
+
+[[processes]]
+name = "beat"
+command = "uv run celery -A config beat --loglevel=INFO --schedule /tmp/oxzoo-django-celery-beat"
+depends_on = ["redis", "worker"]
+
+[deploy]
+install = ["uv sync --frozen", "npm install"]
+build = ["npm", "run", "build"]
+migrate = ["uv run python manage.py migrate --noinput"]
+health_url = "http://127.0.0.1:9117/health"
+
+[frontend]
+dist = "dist"
+api_paths = ["/api", "/health"]
+
+[[domains]]
+name = "celery.oxzoo.sorv.dev"
+tls = true
+spa = true
