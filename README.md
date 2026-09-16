@@ -6,7 +6,8 @@ What this example demonstrates beyond the single-process [oxzoo-react-django](ht
 
 - **Multi-process ordering**: `web`, `worker`, and `beat` systemd units with `depends_on` gates so workers start after the web process is ready.
 - **Infra autowiring**: the `DATABASE_URL` placeholder makes ox provision local PostgreSQL (role + database named by `DATABASE_NAME`) and inject the full DSN; a local Redis is started and injected as `REDIS_URL`. The `[[postgres_databases]]` block then enables `pgcrypto` on that database, whose name must match `DATABASE_NAME`. No manual host setup.
-- **Celery roundtrip**: `GET /api/greeting` enqueues a task, a worker executes it, and the result comes back through Redis.
+- **Celery roundtrip**: `GET /api/greeting` enqueues a task, a worker executes it, and the result comes back through Redis. The worker also reads the `Visit` count from Postgres, so the response proves a second process sees the same database.
+- **Seeded table for heavy scenarios**: migration `0002` creates `Sample` and seeds 50,000 rows, so a dump has real size and `/api/slow/` has a real aggregate to scan. Restores load the dumped rows and skip the seed (the migration is already recorded).
 - **Beat timers**: `CELERYBEAT_SCHEDULE` repeats `heartbeat()` every 60 seconds, printed into the worker's journald log.
 - **Migrations**: the `migrate` deploy hook runs `manage.py migrate --noinput` against the autowired database.
 
@@ -53,11 +54,13 @@ Visiting the domain with `GREETING_TAG=w3-03`:
 
 ```
 build-time: hello world oxzoo-django-celery_w3-03
-api: {"greeting":"hello world oxzoo-django-celery_w3-03","celery":"ok","visits":3}
+api: {"greeting":"hello world oxzoo-django-celery_w3-03","celery":"ok","visits":3,"worker_visits":2}
+slow: {"rows":50000,"total":1249975000}
 ```
 
 - The `build-time` line is baked into the JS bundle at build time.
-- The `api` line is `GET /api/greeting` (JSON shape: `{"greeting": string, "celery": "ok", "visits": number}`); `greeting` reflects the worker's live environment and `visits` counts the `Visit` rows created by each request.
+- The `api` line is `GET /api/greeting` (JSON shape: `{"greeting": string, "celery": "ok", "visits": number, "worker_visits": number}`); `greeting` reflects the worker's live environment, `visits` counts the `Visit` rows after this request, and `worker_visits` is the count the worker read from Postgres before it (so a healthy roundtrip shows `worker_visits == visits - 1`).
+- `GET /api/slow/` returns `{"rows": 50000, "total": 1249975000}` from the seeded `Sample` table; it is the endpoint the load and cutover checks hit.
 - `GET /health` returns `{"ok": true}` (plain `/health` 301-redirects to `/health/`, which ox's readiness gate accepts).
 - The worker journal shows the heartbeat line every 60 seconds:
 
