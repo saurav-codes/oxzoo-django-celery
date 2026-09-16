@@ -11,3 +11,12 @@ class Sample(models.Model):
     # an aggregate over it is measurable.
     label = models.CharField(max_length=64)
     value = models.IntegerField(default=0)
+
+
+class Job(models.Model):
+    # One row per long task, keyed by the Celery task id, so a redelivered
+    # task after a deploy restart finishes exactly once.
+    task_id = models.CharField(max_length=64, unique=True)
+    seconds = models.IntegerField(default=0)
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished = models.BooleanField(default=False)

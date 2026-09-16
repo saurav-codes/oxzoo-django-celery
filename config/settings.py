@@ -60,6 +60,16 @@ CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", _broker_url)
 
 CELERY_TASK_ALWAYS_EAGER = False
 
+# A deploy restarts the worker, so an in-flight task has to survive it. Late
+# acks redeliver a task the killed worker never acknowledged,
+# task_reject_on_worker_lost makes a hard kill reject instead of ack, and the
+# short Redis visibility timeout keeps redelivery prompt (the broker default
+# is one hour). long_job is idempotent, so a redelivery finishes its row
+# instead of adding a second one.
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_BROKER_TRANSPORT_OPTIONS = {"visibility_timeout": 60}
+
 # One timer to prove beat runs: the worker journal repeats this line every 60s.
 # Modern spelling (CELERY_BEAT_SCHEDULE); the old CELERYBEAT_SCHEDULE name is
 # ignored under the namespace="CELERY" bootstrap above.
