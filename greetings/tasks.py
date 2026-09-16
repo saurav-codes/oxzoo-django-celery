@@ -12,7 +12,11 @@ def greeting_line() -> str:
 
 @shared_task
 def greet():
-    return greeting_line()
+    # The worker reads the counter from Postgres itself, so a database
+    # restore has to be visible to a second process, not only to gunicorn.
+    from .models import Visit
+
+    return {"line": greeting_line(), "worker_visits": Visit.objects.count()}
 
 
 @shared_task
