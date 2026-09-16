@@ -2,7 +2,11 @@ from django.db import models
 
 
 class Visit(models.Model):
-    created_at = models.DateTimeField(auto_now_add=True)
+    # created_at was dropped by migration 0005 when DESTRUCTIVE_MIGRATION=drop
+    # (the destructive-migration scenario). The model no longer writes it, so
+    # a code rollback to a release that still does fails loudly instead of
+    # silently serving stale data.
+    pass
 
 
 class Sample(models.Model):
