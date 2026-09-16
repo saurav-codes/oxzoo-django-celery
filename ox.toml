@@ -44,7 +44,10 @@ depends_on = ["redis", "worker"]
 install = ["uv sync --frozen", "npm install"]
 build = ["npm", "run", "build"]
 migrate = ["uv run python manage.py migrate --noinput"]
-health_url = "http://127.0.0.1:9117/health"
+health_url = "http://127.0.0.1:{port}/health"
+# Blue/green: the standby runs on 9118 and nginx moves over only after it
+# answers /health/.
+zero_downtime = true
 
 [frontend]
 dist = "dist"
