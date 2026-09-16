@@ -1,4 +1,5 @@
 import os
+import time
 
 from celery import shared_task
 
@@ -17,6 +18,19 @@ def greet():
     from .models import Visit
 
     return {"line": greeting_line(), "worker_visits": Visit.objects.count()}
+
+
+@shared_task(bind=True, acks_late=True)
+def long_job(self, seconds=20):
+    # Long enough to span a deploy restart. The row is created before the
+    # sleep and keyed by the task id, so a redelivery after the worker is
+    # killed finishes the same row instead of adding a second one.
+    from .models import Job
+
+    Job.objects.get_or_create(task_id=self.request.id, defaults={"seconds": seconds})
+    time.sleep(seconds)
+    Job.objects.filter(task_id=self.request.id).update(finished=True)
+    return {"task_id": self.request.id, "seconds": seconds}
 
 
 @shared_task
