@@ -5,10 +5,8 @@
 name = "oxzoo-django-celery"
 branch = "main"
 runtime = "python"
-framework = "django"
 package_manager = "uv"
 port = 9117
-environment_file = "/etc/ox/projects/oxzoo-django-celery.env"
 required_packages = ["nodejs"]
 
 [[apt_sources]]
