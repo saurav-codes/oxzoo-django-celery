@@ -1,8 +1,8 @@
-# ox deploy manifest for oxzoo-django-celery: the multi-process kitchen sink.
-# Three ordered processes (web, celery worker, celery beat) with redis and a
-# local postgres database autowired from the project env.
+# ox deploy manifest for oxzoo-django-celery: the multi-service kitchen
+# sink. One web process in front of five catalog services: the host-shared
+# postgres and redis (this project's own database and index on each), the
+# celery workers, the beat scheduler, and the flower monitor.
 
-name = "oxzoo-django-celery"
 branch = "main"
 runtime = "python"
 package_manager = "uv"
@@ -16,27 +16,51 @@ suite = "nodistro"
 components = ["main"]
 key_url = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
 
-# Local postgres role + database (DSN injected as DATABASE_URL), with one
-# extension to demonstrate the mechanism.
-[[postgres_databases]]
-name = "oxzoo-celery"
+# Host-shared postgres: the env's DATABASE_URL names this project's own
+# database (ox ensures the role and database), with one extension to
+# demonstrate the mechanism.
+[[services]]
+id = "postgres@17"
+
+[services.args]
 extensions = ["pgcrypto"]
+
+# Host-shared redis: REDIS_URL and CELERY_BROKER_URL carry this project's
+# own index, so queues and result keys never collide with other projects.
+[[services]]
+id = "redis@7"
+
+# The celery worker processes come from the catalog, never hand-written
+# process blocks: one unit consuming the declared queue.
+[[services]]
+id = "celery@5"
+
+[services.args]
+app = "config"
+workers = 1
+queues = ["default"]
+
+# The periodic-task scheduler, same app module, schedule file under the
+# service data dir.
+[[services]]
+id = "celery-beat@5"
+
+[services.args]
+app = "config"
+
+# Flower monitors the same broker the workers use; FLOWER_URL lands in the
+# project env.
+[[services]]
+id = "flower@1"
+
+[services.args]
+app = "config"
 
 [[processes]]
 name = "web"
 command = "uv run gunicorn config.wsgi:application --bind 127.0.0.1:{port} --workers 2"
-depends_on = ["postgres_database.oxzoo-celery", "redis"]
+depends_on = ["postgres", "redis"]
 readiness = "http://127.0.0.1:{port}/health"
-
-[[processes]]
-name = "worker"
-command = "uv run celery -A config worker --loglevel=INFO --concurrency=1"
-depends_on = ["redis", "web"]
-
-[[processes]]
-name = "beat"
-command = "uv run celery -A config beat --loglevel=INFO --schedule /tmp/oxzoo-django-celery-beat"
-depends_on = ["redis", "worker"]
 
 [deploy]
 install = ["uv sync --frozen", "npm install"]
