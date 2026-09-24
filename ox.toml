@@ -38,7 +38,6 @@ id = "celery@5"
 [services.args]
 app = "config"
 workers = 1
-queues = ["default"]
 
 # The periodic-task scheduler, same app module, schedule file under the
 # service data dir.
