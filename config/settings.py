@@ -5,15 +5,19 @@ import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Real deployments set SECRET_KEY in the ox Environment editor.
+# Deployments set SECRET_KEY as an ox variable (Generate on the review screen).
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-secret-key")
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
 
-# ox injects the deploy domain as ALLOWED_HOSTS (comma-separated).
+# ox provides PUBLIC_HOST, the address the project serves. ALLOWED_HOSTS
+# (comma-separated) overrides it, for example to add a second domain.
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.environ.get("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
+    for host in (
+        os.environ.get("ALLOWED_HOSTS")
+        or ",".join(filter(None, [os.environ.get("PUBLIC_HOST"), "127.0.0.1", "localhost"]))
+    ).split(",")
     if host.strip()
 ]
 
@@ -34,9 +38,8 @@ TEMPLATES = []
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# ox autowires a local postgres role + database and injects DATABASE_URL.
-# The sqlite fallback is local-dev convenience only: it exists just when
-# DATABASE_URL is unset, and ox always sets it.
+# ox provides DATABASE_URL from [services] postgres in ox.toml. The sqlite
+# fallback is local-dev convenience only: ox always sets DATABASE_URL.
 if os.environ.get("DATABASE_URL"):
     DATABASES = {"default": dj_database_url.parse(os.environ["DATABASE_URL"])}
 else:
@@ -47,8 +50,8 @@ else:
         }
     }
 
-# Broker and result backend ride the same local redis that ox autowires
-# (REDIS_URL). CELERY_BROKER_URL overrides for custom setups; the 127.0.0.1
+# Broker and result backend ride the project's redis, which ox provides as
+# REDIS_URL from [services] redis. CELERY_BROKER_URL overrides for custom setups; the 127.0.0.1
 # default covers running a worker on a dev machine without env.
 _broker_url = (
     os.environ.get("CELERY_BROKER_URL")

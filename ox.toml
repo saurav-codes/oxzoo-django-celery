@@ -1,80 +1,25 @@
-# ox deploy manifest for oxzoo-django-celery: the multi-service kitchen
-# sink. One web process in front of five catalog services: the host-shared
-# postgres and redis (this project's own database and index on each), the
-# celery workers, the beat scheduler, and the flower monitor.
+# Django + Celery worker and beat, postgres (pgcrypto), redis, and a Vite SPA.
 
-branch = "main"
-runtime = "python"
-package_manager = "uv"
-port = 9117
-required_packages = ["nodejs"]
+[app]
+start  = "uv run gunicorn config.wsgi:application --bind 127.0.0.1:$PORT --workers 2"
+health = "/health"
 
-[[apt_sources]]
-name = "nodesource"
-url = "https://deb.nodesource.com/node_22.x"
-suite = "nodistro"
-components = ["main"]
-key_url = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
-
-# Host-shared postgres: the env's DATABASE_URL names this project's own
-# database (ox ensures the role and database), with one extension to
-# demonstrate the mechanism.
-[[services]]
-id = "postgres@17"
-
-[services.args]
-extensions = ["pgcrypto"]
-
-# Host-shared redis: REDIS_URL and CELERY_BROKER_URL carry this project's
-# own index, so queues and result keys never collide with other projects.
-[[services]]
-id = "redis@7"
-
-# The celery worker processes come from the catalog, never hand-written
-# process blocks: one unit consuming the declared queue.
-[[services]]
-id = "celery@5"
-
-[services.args]
-app = "config"
-workers = 1
-
-# The periodic-task scheduler, same app module, schedule file under the
-# service data dir.
-[[services]]
-id = "celery-beat@5"
-
-[services.args]
-app = "config"
-
-# Flower monitors the same broker the workers use; FLOWER_URL lands in the
-# project env.
-[[services]]
-id = "flower@1"
-
-[services.args]
-app = "config"
-
-[[processes]]
-name = "web"
-command = "uv run gunicorn config.wsgi:application --bind 127.0.0.1:{port} --workers 2"
-depends_on = ["postgres", "redis"]
-readiness = "http://127.0.0.1:{port}/health"
-
-[deploy]
-install = ["uv sync --frozen", "npm install"]
-build = ["npm", "run", "build"]
-migrate = ["uv run python manage.py migrate --noinput"]
-health_url = "http://127.0.0.1:{port}/health"
-# Blue/green: the standby runs on 9118 and nginx moves over only after it
-# answers /health/.
-zero_downtime = true
-
-[frontend]
-dist = "dist"
-api_paths = ["/api", "/health"]
-
-[[domains]]
-name = "celery.oxzoo.sorv.dev"
-tls = true
+[static]
+dir = "dist"
 spa = true
+api = ["/api", "/health"]
+
+[build]
+commands = ["uv sync --frozen --no-dev", "npm run build"]
+migrate  = "uv run python manage.py migrate --noinput"
+
+[workers]
+worker = "uv run celery -A config worker --loglevel=INFO --concurrency=1"
+beat   = "uv run celery -A config beat --loglevel=INFO --schedule=$OX_DATA_DIR/celerybeat-schedule"
+
+[services]
+postgres = { extensions = ["pgcrypto"] }
+redis    = {}
+
+[tools]
+node = "24"

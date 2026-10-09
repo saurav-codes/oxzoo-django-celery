@@ -2,86 +2,132 @@
 
 Deployed with [ox](https://deploywithox.com): deploy a repo to your own server with one command, no Docker. [Docs](https://deploywithox.com/docs) · [Guide for this stack](https://deploywithox.com/docs/guides/django)
 
-Official ox deploy example: the multi-process kitchen sink. Django 5.2 serves a JSON API behind gunicorn, a Celery worker executes tasks through a local Redis broker, Celery beat fires a heartbeat task every 60 seconds, data lives in a local PostgreSQL database, and a React 18 SPA built by Vite shows both the build-time and the runtime greeting. ox deploys all of it to one Ubuntu VPS from a single `ox.toml` at the repo root: three systemd processes ordered by `depends_on`, nginx serving the built frontend and proxying the API paths, and every install/build/migrate hook running as the unprivileged project user. Traffic switches only after the health check passes.
+An [ox](https://deploywithox.com) deploy example with many processes: Django 5.2 serves a JSON API behind gunicorn, a Celery worker runs tasks through Redis, Celery beat fires a heartbeat task every 60 seconds, data lives in PostgreSQL, and a React 18 SPA built by Vite shows both the build-time and the run-time greeting. ox deploys all of it to your own Ubuntu server from one `ox.toml`: systemd runs gunicorn, the worker and beat; Caddy serves the built SPA and sends the API paths to gunicorn; traffic moves to a new release only after its health check passes.
 
-What this example demonstrates beyond the single-process [oxzoo-react-django](https://github.com/saurav-codes/oxzoo-react-django):
+What it shows:
 
-- **Multi-process ordering**: `web`, `worker`, and `beat` systemd units with `depends_on` gates so workers start after the web process is ready.
-- **Infra autowiring**: the `DATABASE_URL` placeholder makes ox provision local PostgreSQL (role + database named by `DATABASE_NAME`) and inject the full DSN; a local Redis is started and injected as `REDIS_URL`. The `[[postgres_databases]]` block then enables `pgcrypto` on that database, whose name must match `DATABASE_NAME`. No manual host setup.
-- **Celery roundtrip**: `GET /api/greeting` enqueues a task, a worker executes it, and the result comes back through Redis. The worker also reads the `Visit` count from Postgres, so the response proves a second process sees the same database.
-- **Seeded table for heavy scenarios**: migration `0002` creates `Sample` and seeds 50,000 rows, so a dump has real size and `/api/slow/` has a real aggregate to scan. Restores load the dumped rows and skip the seed (the migration is already recorded).
-- **Zero-downtime cutover**: `[deploy] zero_downtime = true` runs a standby slot on 9118 and moves nginx over only after it answers `/health/`, so a deploy does not drop the restart window's requests.
-- **Scenario probes**: `MIGRATION_LOCK_SECONDS` makes migration `0004` hold an ACCESS EXCLUSIVE lock on the seeded table for that many seconds (blocking-migration check), and `DESTRUCTIVE_MIGRATION=drop` makes `0005` drop `greetings_visit.created_at` so a code rollback fails loudly (rollback check). Both are no-ops unset.
-- **Worker tasks survive a deploy**: `long_job` sleeps for up to 300s, so a deploy restart lands in the middle of it. `task_acks_late` plus `task_reject_on_worker_lost` redeliver a task the killed worker never acknowledged, the Redis visibility timeout keeps that redelivery prompt, and the row is keyed by the Celery task id so a redelivery finishes exactly one row.
-- **Beat timers**: `CELERYBEAT_SCHEDULE` repeats `heartbeat()` every 60 seconds, printed into the worker's journald log.
-- **Migrations**: the `migrate` deploy hook runs `manage.py migrate --noinput` against the autowired database.
+- **Services from one line each**: `[services]` gives the project a PostgreSQL database with the `pgcrypto` extension (`DATABASE_URL`) and a private Redis (`REDIS_URL`). Nothing to install or wire by hand.
+- **A Celery round trip**: `GET /api/greeting/` enqueues a task, the worker runs it, and the result comes back through Redis. The worker also reads the `Visit` count from Postgres, so the response proves a second process sees the same database.
+- **Workers and beat**: `[workers]` runs `worker` and `beat`. Beat keeps its schedule file in `$OX_DATA_DIR`, which survives releases. The worker's page in the ox console (and `ox celery oxzoo-django-celery worker`) shows its tasks and queues.
+- **Zero-downtime deploys**: the app's port is not pinned, so ox starts the new release beside the old one and switches traffic once `/health` answers.
+- **Tasks survive a deploy**: `long_job` sleeps up to 300 s, so a deploy restart lands in the middle of it. `task_acks_late` and `task_reject_on_worker_lost` redeliver a task the stopped worker never acknowledged, and the row is keyed by the Celery task id, so a redelivery finishes exactly one row.
+- **A seeded table**: migration `0002` creates `Sample` with 50,000 rows, so a backup has real size and `/api/slow/` has a real aggregate to scan.
+- **Migrations with a snapshot**: `[build] migrate` runs `manage.py migrate` before traffic switches, and ox snapshots the database first.
+- **Scenario probes**: `MIGRATION_LOCK_SECONDS` makes migration `0004` hold an ACCESS EXCLUSIVE lock on the seeded table for that many seconds, and `DESTRUCTIVE_MIGRATION=drop` makes `0005` drop `greetings_visit.created_at` so a code rollback fails loudly. Both are no-ops when unset.
 
-## Architecture
+## Stack
 
 | Component | Version | Purpose |
-| ----------------- | -------------------------- | ---------------------------------------------- |
+| --------- | ------- | ------- |
 | Django | 5.2.17 | JSON API (`/api/greeting/`, `/health/`) |
-| gunicorn | 26.2.0 | WSGI server for the `web` process |
-| Celery | 5.6.3 (`celery[redis]`) | `worker` and `beat` processes |
-| redis-py | 6.4.0 | broker + result backend transport |
-| psycopg | 3.3.5 (binary) | PostgreSQL driver for the `Visit` model |
-| dj-database-url | 3.1.2 | parses `DATABASE_URL` into `DATABASES` |
-| Python tooling | uv (`uv.lock`, `.python-version`), Python 3.13 | locked installs |
-| React + Vite | react/react-dom 18.3.1, vite 5.4.21 | SPA built to `dist/` |
-| PostgreSQL + Redis | provisioned by ox | local role/db + local broker, both on the VPS |
-| Serving | nginx + systemd | provisioned by ox |
+| gunicorn | 26.2.0 | WSGI server for the app |
+| Celery | 5.6.3 (`celery[redis]`) | `worker` and `beat` |
+| psycopg | 3.3.5 (binary) | PostgreSQL driver |
+| dj-database-url | 3.1.2 | parses `DATABASE_URL` |
+| Python | 3.13 with uv (`uv.lock`, `.python-version`) | locked installs |
+| React + Vite | react 18.3.1, vite 5.4.21 | SPA built to `dist/` |
+| PostgreSQL 18, Redis 8 | provided by ox | `[services]` |
+
+## ox.toml
+
+```toml
+# Django + Celery worker and beat, postgres (pgcrypto), redis, and a Vite SPA.
+
+[app]
+start  = "uv run gunicorn config.wsgi:application --bind 127.0.0.1:$PORT --workers 2"
+health = "/health"
+
+[static]
+dir = "dist"
+spa = true
+api = ["/api", "/health"]
+
+[build]
+commands = ["uv sync --frozen --no-dev", "npm run build"]
+migrate  = "uv run python manage.py migrate --noinput"
+
+[workers]
+worker = "uv run celery -A config worker --loglevel=INFO --concurrency=1"
+beat   = "uv run celery -A config beat --loglevel=INFO --schedule=$OX_DATA_DIR/celerybeat-schedule"
+
+[services]
+postgres = { extensions = ["pgcrypto"] }
+redis    = {}
+
+[tools]
+node = "24"
+```
+
+The repo has two lockfiles, so ox's detected install is `npm ci` and `[build] commands` adds `uv sync` before the SPA build.
 
 ## Environment flow
 
-- **`GREETING_TAG` is runtime env for Django and the worker**: `greetings/tasks.py` reads it from `os.environ` inside the worker process on every task, so `GET /api/greeting` returns `hello world oxzoo-django-celery_{GREETING_TAG}` with whatever the ox Environment editor currently holds. Change it in the editor and the API line follows without a redeploy.
-- **`GREETING_TAG` is build-time env for the SPA**: `vite.config.js` sets `envPrefix: ["GREETING_", "VITE_"]`, so `GREETING_TAG` present during `npm run build` is baked into the bundle via `import.meta.env.GREETING_TAG` (one contiguous template literal in `src/App.jsx`, on purpose). Changing the tag means rebuilding the SPA.
-- **`SECRET_KEY`**: Django signing key. Placeholder in `.env.example`; set a real value in the ox Environment editor.
-- **`DATABASE_URL`** (`postgres://REPLACE_ME` in `.env.example`): autowired by ox — the scheme signals local PostgreSQL provisioning and the `REPLACE_ME` value is regenerated into the full DSN injected into every process. `DATABASE_NAME` (`oxzoo-celery`) names the database ox creates; it must equal the `[[postgres_databases]]` name in `ox.toml` so the `pgcrypto` extension step targets the same database. Unset locally, `settings.py` falls back to `db.sqlite3` for convenience; ox always sets the real one.
-- **`REDIS_URL`** (`redis://REPLACE_ME` in `.env.example`): autowired by ox. The scheme signals a local Redis, ox starts it and regenerates the DSN; `config/settings.py` uses it for both `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` (a `CELERY_BROKER_URL` env var overrides if you ever split them).
-- **`ALLOWED_HOSTS`**: ox injects the deploy domain (comma-separated); `settings.py` reads it directly. `DJANGO_DEBUG` defaults to `false`.
+- **`GREETING_TAG`, run time:** `greetings/tasks.py` reads it inside the worker on every task, so `GET /api/greeting/` returns `hello world oxzoo-django-celery_<GREETING_TAG>`.
+- **`GREETING_TAG`, build time:** `vite.config.js` sets `envPrefix: ["GREETING_", "VITE_"]`, so the value present during `npm run build` is baked into the bundle. ox sets your variables before the build, and changing one with `ox vars set` redeploys, which rebuilds the SPA.
+- **`SECRET_KEY`:** Django's signing key. Generate it on the review screen (or with `--generate SECRET_KEY`).
+- **`DATABASE_URL`, `REDIS_URL`:** provided by ox from `[services]`. `config/settings.py` uses `REDIS_URL` for both the Celery broker and the result backend.
+- **`ALLOWED_HOSTS`:** `settings.py` allows `PUBLIC_HOST`, which ox provides, plus `127.0.0.1`. Set `ALLOWED_HOSTS` (comma-separated) only to override it. `DJANGO_DEBUG` defaults to `false`.
 
 ## Deploy with ox
 
-1. In the ox dashboard, create a project from the clone URL: `git@github.com:saurav-codes/oxzoo-django-celery`
-2. **Before the first deploy**, paste the values from `.env.example` into the project's Environment editor (at minimum `GREETING_TAG`, `DATABASE_URL`, `DATABASE_NAME`, and `REDIS_URL`). The editor stores the whole text, so include every key on every edit. ox provisions infra from these values: the `postgres://` and `redis://` schemes signal local PostgreSQL and Redis, `REPLACE_ME` values are regenerated by autowiring, and `DATABASE_NAME` must match the `[[postgres_databases]]` name so the `pgcrypto` extension step targets the same database. The build hook bakes `GREETING_TAG` into the SPA, so it must exist before the first deploy.
-3. Press **Deploy**. ox:
-   - creates the local postgres role + `oxzoo-celery` database with the `pgcrypto` extension and starts the local Redis,
-   - runs `uv sync --frozen` and `npm install` (release-local installs),
-   - runs `npm run build` and `uv run python manage.py migrate --noinput`,
-   - starts the `worker` and `beat` processes (Redis broker) and the `web` process (`uv run gunicorn config.wsgi:application` on `127.0.0.1:9117`), gated by `depends_on` and the `http://127.0.0.1:9117/health` readiness check,
-   - points nginx at `dist/` (`spa = true`) and proxies `/api` + `/health` to gunicorn.
+```sh
+curl -fsSL https://deploywithox.com/install.sh | sh
+ox login
+ox new https://github.com/saurav-codes/oxzoo-django-celery
+printf 'GREETING_TAG=demo\n' | ox review oxzoo-django-celery --generate SECRET_KEY --from-file - --wait
+```
 
-Expected domain: `https://celery.oxzoo.sorv.dev` (TLS provisioned by ox).
+The plan, offline:
+
+```console
+$ ox check .
+ox check . (manifest: ox.toml)
+
+  app.start                  uv run gunicorn config.wsgi:application --bind 127.0.0.1:$PORT --workers 2 declared
+  app.health                 /health                                              declared
+  static.dir                 dist                                                 declared
+  static.spa                 true                                                 declared
+  static.api                 /api, /health                                        declared
+  build.install              npm ci                                               detected:package-lock.json
+  build.commands[0]          uv sync --frozen --no-dev                            declared
+  build.commands[1]          npm run build                                        declared
+  build.migrate              uv run python manage.py migrate --noinput            declared
+  workers.beat               uv run celery -A config beat --loglevel=INFO --schedule=$OX_DATA_DIR/celerybeat-schedule declared
+  workers.worker             uv run celery -A config worker --loglevel=INFO --concurrency=1 declared
+  tools.node                 24                                                   declared
+  tools.python               3.13                                                 detected:.python-version
+  tools.uv                   0.11                                                 default
+  services.postgres          postgres 18 (shared)                                 default
+  services.redis             redis 8 (only for this project)                      default
+
+  Provided by ox: PORT, HOST, OX_ENV, OX_PROJECT, OX_RELEASE, OX_DATA_DIR, PUBLIC_URL, PUBLIC_HOST, DATABASE_URL, REDIS_URL
+  Set on the dashboard before the first deploy: GREETING_TAG, SECRET_KEY (Django or Flask key: 64 random characters, Generate makes it)
+
+Ready to deploy.
+```
 
 ## Expected output
 
-Visiting the domain with `GREETING_TAG=w3-03`:
+With `GREETING_TAG=demo`:
 
 ```
-build-time: hello world oxzoo-django-celery_w3-03
-api: {"greeting":"hello world oxzoo-django-celery_w3-03","celery":"ok","visits":3,"worker_visits":2}
+build-time: hello world oxzoo-django-celery_demo
+api: {"greeting":"hello world oxzoo-django-celery_demo","celery":"ok","visits":3,"worker_visits":2}
 slow: {"rows":50000,"total":1249975000}
 ```
 
-- The `build-time` line is baked into the JS bundle at build time.
-- The `api` line is `GET /api/greeting` (JSON shape: `{"greeting": string, "celery": "ok", "visits": number, "worker_visits": number}`); `greeting` reflects the worker's live environment, `visits` counts the `Visit` rows after this request, and `worker_visits` is the count the worker read from Postgres before it (so a healthy roundtrip shows `worker_visits == visits - 1`).
-- `GET /api/slow/` returns `{"rows": 50000, "total": 1249975000}` from the seeded `Sample` table; it is the endpoint the load and cutover checks hit.
-- `GET /api/long/?seconds=45` enqueues a `long_job` and returns its task id; `GET /api/jobs/` lists the rows. `finished: true` after a deploy that restarted the worker proves the task was redelivered and completed exactly once (the row count must stay one per task id).
-- `GET /health` returns `{"ok": true}` (plain `/health` 301-redirects to `/health/`, which ox's readiness gate accepts).
-- The worker journal shows the heartbeat line every 60 seconds:
-
-```
-hello world oxzoo-django-celery_w3-03
-```
+- `build-time` is baked into the JS bundle; `api` is `GET /api/greeting/`. `worker_visits` is the count the worker read from Postgres before this request, so a healthy round trip shows `worker_visits == visits - 1`.
+- `GET /api/slow/` aggregates the seeded `Sample` table.
+- `GET /api/long/?seconds=45` enqueues a `long_job` and returns its task id; `GET /api/jobs/` lists the rows. `finished: true` after a deploy that restarted the worker proves the task was redelivered and finished once.
+- `GET /health/` returns `{"ok": true}` (`/health` redirects to it).
+- `ox logs oxzoo-django-celery --process worker` shows the beat heartbeat every 60 seconds.
 
 ## Local development
 
-1. Install deps: `uv sync`
-2. Start local Redis and PostgreSQL (`redis-server` and `postgres`), or edit `.env` to point elsewhere; with neither `DATABASE_URL` nor Redis set you still get sqlite + a broker error only on `/api/greeting`
-3. Migrate: `uv run python manage.py migrate --noinput`
-4. Web: `uv run python manage.py runserver` (Django reads `GREETING_TAG` from the shell env)
+1. `uv sync`
+2. Start Redis and PostgreSQL locally and export `DATABASE_URL` and `REDIS_URL`, or rely on the defaults (SQLite, and Redis on `127.0.0.1:6379`).
+3. `uv run python manage.py migrate --noinput`
+4. Web: `uv run python manage.py runserver`
 5. Worker: `uv run celery -A config worker --loglevel=INFO --concurrency=1`
 6. Beat: `uv run celery -A config beat --loglevel=INFO --schedule /tmp/oxzoo-django-celery-beat`
-7. SPA: `npm install` then `npm run dev` (build with `npm run build`)
-
-Copy `.env.example` to `.env` and fill in values if you do not want to rely on the sqlite/localhost defaults.
+7. SPA: `npm install`, then `npm run dev` (or `npm run build`)
