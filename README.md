@@ -1,5 +1,7 @@
 # oxzoo-django-celery
 
+Deployed with [ox](https://deploywithox.com): deploy a repo to your own server with one command, no Docker. [Docs](https://deploywithox.com/docs) · [Guide for this stack](https://deploywithox.com/docs/guides/django)
+
 Official ox deploy example: the multi-process kitchen sink. Django 5.2 serves a JSON API behind gunicorn, a Celery worker executes tasks through a local Redis broker, Celery beat fires a heartbeat task every 60 seconds, data lives in a local PostgreSQL database, and a React 18 SPA built by Vite shows both the build-time and the runtime greeting. ox deploys all of it to one Ubuntu VPS from a single `ox.toml` at the repo root: three systemd processes ordered by `depends_on`, nginx serving the built frontend and proxying the API paths, and every install/build/migrate hook running as the unprivileged project user. Traffic switches only after the health check passes.
 
 What this example demonstrates beyond the single-process [oxzoo-react-django](https://github.com/saurav-codes/oxzoo-react-django):
