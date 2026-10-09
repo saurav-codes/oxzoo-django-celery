@@ -1,6 +1,6 @@
 # A fresh database never runs the destructive scenario (0005 is a no-op
 # without DESTRUCTIVE_MIGRATION=drop), so greetings_visit.created_at stays
-# NOT NULL with no default while the model no longer writes it — and
+# NOT NULL with no default while the model no longer writes it, and
 # Visit.objects.create() fails on every fresh deploy. Give the column a
 # default when it exists; the scenario's drop still breaks the old release's
 # explicit insert either way.
